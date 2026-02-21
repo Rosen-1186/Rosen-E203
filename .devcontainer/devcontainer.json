@@ -1,0 +1,64 @@
+{
+    "name": "E203-RISCV-Pro-Dev",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "args": {
+            "USERNAME": "rosen"
+        }
+    },
+    "remoteUser": "rosen",
+    "workspaceFolder": "/workspaces/e203_project",
+    "customizations": {
+        "vscode": {
+            "settings": {
+                // 1. 核心终端与编辑器设置
+                "terminal.integrated.defaultProfile.linux": "bash",
+                "files.insertFinalNewline": true,
+                "editor.formatOnSave": true,
+                // 2. Verilog 实时诊断
+                "verilog.linting.linter": "iverilog",
+                "verilog.linting.iverilog.arguments": "-i",
+                // 3. C/C++ 深度配置 (解决红色波浪线)
+                "C_Cpp.default.intelliSenseMode": "linux-gcc-riscv64",
+                "C_Cpp.default.compilerPath": "/opt/riscv-gcc/bin/riscv64-unknown-elf-gcc",
+                "C_Cpp.default.cStandard": "c11",
+                "C_Cpp.default.cppStandard": "c++17",
+                "C_Cpp.default.includePath": [
+                    "${workspaceFolder}/**",
+                    "/usr/include/**",
+                    "/opt/riscv-gcc/**" // 让 VS Code 去新的官方工具链目录找头文件
+                ],
+                // 4. Makefile 自动化设置
+                "makefile.extensionLog.logLevel": "Info",
+                "makefile.configureOnOpen": true
+            },
+            "extensions": [
+                // 基础套件
+                "mcusak.vscode-rtl-all-in-one", // Verilog 核心
+                "ms-vscode.cpptools", // C 语言基础
+                "ms-vscode.cpptools-extension-pack", // C 语言全家桶
+                "ms-vscode.makefile-tools", // 识别 Makefile 编译参数
+                // 调试与底层工具
+                "mcu-debug.debug-tracker-vscode",
+                "marus25.cortex-debug", // GDB 调试界面
+                "ms-vscode.hexeditor", // 查看 Hex/Bin 文件
+                // 辅助增强
+                "ms-python.python",
+                "eamodio.gitlens", // 更好的 Git 历史追踪
+                "mshr-h.VerilogHDL"
+            ]
+        }
+    },
+    "runArgs": [
+        "--privileged",
+        "--net=host"
+    ],
+    "mounts": [
+        "source=/dev,target=/dev,type=bind"
+    ],
+    "remoteEnv": {
+        "DISPLAY": "${localEnv:DISPLAY}",
+        // 自动合并原有 PATH 并添加 RISC-V 工具链路径
+        "PATH": "${containerEnv:PATH}:/usr/lib/riscv64-unknown-elf/bin"
+    }
+}
