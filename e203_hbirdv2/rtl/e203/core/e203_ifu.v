@@ -122,6 +122,11 @@ module e203_ifu(
   input  dec2ifu_divu  ,
   input  dec2ifu_remu  ,
 
+  // Phase1(BHT): EXU commit 提供的训练信息
+  input  bht_upd_valid,
+  input  [`E203_PC_SIZE-1:0] bht_upd_pc,
+  input  bht_upd_taken,
+
   input  clk,
   input  rst_n
   );
@@ -185,6 +190,10 @@ module e203_ifu(
     .dec2ifu_rem   (dec2ifu_rem   ),
     .dec2ifu_divu  (dec2ifu_divu  ),
     .dec2ifu_remu  (dec2ifu_remu  ),
+
+    .bht_upd_valid  (bht_upd_valid),
+    .bht_upd_pc     (bht_upd_pc),
+    .bht_upd_taken  (bht_upd_taken),
 
     .clk           (clk          ),
     .rst_n         (rst_n        ) 

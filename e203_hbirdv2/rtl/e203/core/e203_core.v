@@ -370,6 +370,11 @@ module e203_core(
   wire dec2ifu_divu  ;
   wire dec2ifu_remu  ;
 
+  // Phase1(BHT): EXU commit -> IFU 训练通道
+  wire bht_upd_valid;
+  wire [`E203_PC_SIZE-1:0] bht_upd_pc;
+  wire bht_upd_taken;
+
 
   wire itcm_nohold;
 
@@ -445,6 +450,10 @@ module e203_core(
     .dec2ifu_divu           (dec2ifu_divu  ),
     .dec2ifu_remu           (dec2ifu_remu  ),
 
+    .bht_upd_valid          (bht_upd_valid),
+    .bht_upd_pc             (bht_upd_pc),
+    .bht_upd_taken          (bht_upd_taken),
+
     .clk                    (clk_core_ifu  ),
     .rst_n                  (rst_n         ) 
   );
@@ -496,6 +505,9 @@ module e203_core(
 
 
     .excp_active            (excp_active),
+    .bht_upd_valid          (bht_upd_valid),
+    .bht_upd_pc             (bht_upd_pc),
+    .bht_upd_taken          (bht_upd_taken),
     .commit_mret            (commit_mret),
     .commit_trap            (commit_trap),
     .test_mode              (test_mode),

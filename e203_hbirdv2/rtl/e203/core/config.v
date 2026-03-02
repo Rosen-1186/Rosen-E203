@@ -98,3 +98,12 @@
 `define E203_CFG_SUPPORT_SHARE_MULDIV
 `define E203_CFG_SUPPORT_AMO
 `define E203_CFG_DTCM_ADDR_WIDTH 16
+
+/////////////////////////////////////////////////////////////////
+// Phase1: IFU 动态分支预测(BHT)
+// 说明：
+// 1) 默认打开，便于直接进入 Phase1 实验；
+// 2) 若要回退到原项目静态预测，只需注释掉 E203_CFG_BPU_USE_BHT；
+// 3) E203_CFG_BHT_IDX_W=6 表示 64 项（索引 PC[7:2]）。
+`define E203_CFG_BPU_USE_BHT
+`define E203_CFG_BHT_IDX_W 6

@@ -107,6 +107,19 @@
                               
 `define E203_DTCM_ADDR_BASE   `E203_CFG_DTCM_ADDR_BASE 
 `define E203_ITCM_ADDR_BASE   `E203_CFG_ITCM_ADDR_BASE 
+
+// Phase1: BHT 配置导出
+`ifdef E203_CFG_BPU_USE_BHT
+  `define E203_BPU_USE_BHT
+`endif
+
+`ifdef E203_CFG_BHT_IDX_W
+  `define E203_BHT_IDX_W `E203_CFG_BHT_IDX_W
+`else
+  `define E203_BHT_IDX_W 6
+`endif
+
+`define E203_BHT_ENTRIES (1<<`E203_BHT_IDX_W)
                              
 
 

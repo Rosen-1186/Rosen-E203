@@ -32,6 +32,11 @@ module e203_exu(
   output exu_active,
   output excp_active,
 
+  // Phase1(BHT): commit -> IFU 的预测器训练通道
+  output                     bht_upd_valid,
+  output [`E203_PC_SIZE-1:0] bht_upd_pc,
+  output                     bht_upd_taken,
+
   output core_wfi,
   output tm_stop,
   output itcm_nohold,
@@ -771,6 +776,10 @@ module e203_exu(
     .commit_trap         (commit_trap),
     .core_wfi            (core_wfi        ),
     .nonflush_cmt_ena    (nonflush_cmt_ena),
+
+    .bht_upd_valid        (bht_upd_valid),
+    .bht_upd_pc           (bht_upd_pc),
+    .bht_upd_taken        (bht_upd_taken),
 
     .excp_active         (excp_active),
 

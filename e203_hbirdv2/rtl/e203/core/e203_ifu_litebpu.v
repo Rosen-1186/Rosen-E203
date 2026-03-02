@@ -57,6 +57,11 @@ module e203_ifu_litebpu(
   input  [`E203_XLEN-1:0] rf2bpu_x1,
   input  [`E203_XLEN-1:0] rf2bpu_rs1,
 
+  // Phase1(BHT): 来自 commit 的训练信息
+  input  bht_upd_valid,
+  input  [`E203_PC_SIZE-1:0] bht_upd_pc,
+  input  bht_upd_taken,
+
   input  clk,
   input  rst_n
   );
@@ -81,8 +86,63 @@ module e203_ifu_litebpu(
   //          jump, and not-taken if it is forward jump. The target address of JAL
   //          is calculated based on current PC value and offset
 
-  // The JAL and JALR is always jump, bxxx backward is predicted as taken  
-  assign prdt_taken   = (dec_jal | dec_jalr | (dec_bxx & dec_bjp_imm[`E203_XLEN-1]));  
+  // ----------------------------------------------------------------------
+  // 原项目静态预测路径（保留）:
+  //   JAL/JALR 一律预测跳转；Bxx 采用“后向taken、前向not-taken”。
+  // 下面的 dynamic(BHT) 逻辑会在 dec_bxx 场景替换该静态决策。
+  // ----------------------------------------------------------------------
+  wire static_prdt_taken = (dec_jal | dec_jalr | (dec_bxx & dec_bjp_imm[`E203_XLEN-1]));
+
+`ifdef E203_BPU_USE_BHT
+  // ----------------------------------------------------------------------
+  // Phase1: 小型 BHT（2-bit 饱和计数器）
+  // 功能目标：
+  //   1) 在 Bxx 上使用动态预测，降低误预测率；
+  //   2) 保持 JAL/JALR 语义不变，确保与原项目兼容；
+  //   3) 可通过 config 宏回退到原静态策略。
+  // 索引策略：默认 PC[7:2]（64项），由 E203_CFG_BHT_IDX_W 配置。
+  // ----------------------------------------------------------------------
+  localparam E203_BHT_IDX_MSB = (`E203_BHT_IDX_W + 1);
+  reg [1:0] bht_cnt_r [0:`E203_BHT_ENTRIES-1];
+
+  wire [`E203_BHT_IDX_W-1:0] bht_rd_idx = pc[E203_BHT_IDX_MSB:2];
+  wire [`E203_BHT_IDX_W-1:0] bht_wr_idx = bht_upd_pc[E203_BHT_IDX_MSB:2];
+  wire bht_prdt_taken = bht_cnt_r[bht_rd_idx][1];
+
+  integer bht_i;
+  reg [1:0] bht_wr_val;
+  always @(*) begin
+    bht_wr_val = bht_cnt_r[bht_wr_idx];
+    if (bht_upd_taken) begin
+      if (bht_cnt_r[bht_wr_idx] != 2'b11) begin
+        bht_wr_val = bht_cnt_r[bht_wr_idx] + 2'b01;
+      end
+    end
+    else begin
+      if (bht_cnt_r[bht_wr_idx] != 2'b00) begin
+        bht_wr_val = bht_cnt_r[bht_wr_idx] - 2'b01;
+      end
+    end
+  end
+
+  always @(posedge clk or negedge rst_n) begin
+    if(rst_n == 1'b0) begin
+      // 初始化为弱 not-taken(01)，避免上电后强偏置。
+      for (bht_i = 0; bht_i < `E203_BHT_ENTRIES; bht_i = bht_i + 1) begin
+        bht_cnt_r[bht_i] <= 2'b01;
+      end
+    end
+    else if (bht_upd_valid) begin
+      bht_cnt_r[bht_wr_idx] <= bht_wr_val;
+    end
+  end
+
+  // 兼容策略：只在 Bxx 上启用 BHT；JAL/JALR 保持原行为。
+  assign prdt_taken = dec_jal | dec_jalr | (dec_bxx & bht_prdt_taken);
+`else
+  // 回退路径：沿用原项目静态预测。
+  assign prdt_taken = static_prdt_taken;
+`endif
   // The JALR with rs1 == x1 have dependency or xN have dependency
   wire dec_jalr_rs1x0 = (dec_jalr_rs1idx == `E203_RFIDX_WIDTH'd0);
   wire dec_jalr_rs1x1 = (dec_jalr_rs1idx == `E203_RFIDX_WIDTH'd1);

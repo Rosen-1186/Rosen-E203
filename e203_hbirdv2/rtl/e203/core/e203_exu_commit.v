@@ -34,6 +34,14 @@ module e203_exu_commit(
   output  core_wfi,
   output  nonflush_cmt_ena,
 
+  // Phase1(BHT): 提供分支结果更新通道给 IFU
+  // 说明：
+  // - 这里输出的是“提交点看到的最终方向”，用于更新 BHT 计数器。
+  // - valid 仅在条件分支(Bxx) commit 时拉高，避免 JAL/JALR 污染 BHT。
+  output                     bht_upd_valid,
+  output [`E203_PC_SIZE-1:0] bht_upd_pc,
+  output                     bht_upd_taken,
+
   output  excp_active,
 
   input   amo_wait,
@@ -316,6 +324,17 @@ module e203_exu_commit(
 
   assign cmt_ena = alu_cmt_i_valid & alu_cmt_i_ready;
   assign cmt_instret_ena = cmt_ena & (~alu_brchmis_flush_req);
+
+  // RV32I Bxx 指令 opcode = 7'b1100011
+  wire cmt_is_bxx = (alu_cmt_i_instr[6:0] == 7'b1100011);
+
+  // Phase1(BHT) 更新事件：在 commit 点使用真实分支方向训练预测器
+  // 兼容说明：
+  // - 原工程并无该通道；新增后不影响原有 flush/异常路径。
+  // - 若在 config 中关闭 BHT，该通道将被下游忽略。
+  assign bht_upd_valid = cmt_ena & alu_cmt_i_bjp & cmt_is_bxx;
+  assign bht_upd_pc    = alu_cmt_i_pc;
+  assign bht_upd_taken = alu_cmt_i_bjp_rslv;
 
   // Generate the signal as the real-commit enable (non-flush)
   assign nonflush_cmt_ena = cmt_ena & (~pipe_flush_req);
