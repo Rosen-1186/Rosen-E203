@@ -35,6 +35,9 @@ module tb_top();
   reg [31:0] ifu_wait_cycle;
   reg [31:0] ifu_flush_cycle;
   reg [31:0] lsu_wait_cycle;
+  reg [31:0] ifu_req_block_cycle;
+  reg [31:0] ifu_rsp_block_cycle;
+  reg [31:0] ir_busy_cycle;
   reg [31:0] same_pc_streak;
   reg [`E203_PC_SIZE-1:0] last_commit_pc;
   reg auto_finish_by_stuck_pc;
@@ -47,24 +50,14 @@ module tb_top();
 
   wire ifu_bpu_wait = `IFU_IFTCH.bpu_wait;
   wire ifu_pipe_flush_req = `IFU_IFTCH.pipe_flush_req_real;
+  wire ifu_req_block = `IFU_IFTCH.ifu_req_valid & (~`IFU_IFTCH.ifu_req_ready);
+  wire ifu_rsp_block = `IFU_IFTCH.ifu_rsp_valid & (~`IFU_IFTCH.ifu_rsp_ready);
+  wire ifu_ir_busy = `IFU_IFTCH.ifu_o_valid & (~`IFU_IFTCH.ifu_o_ready);
 
   wire lsu_cmd_wait = `LSU_CTRL.agu_icb_cmd_valid & (~`LSU_CTRL.agu_icb_cmd_ready);
 
-  // ----------------------------------------------------------------------
-  // Auto-finish watcher (TB only, no DUT behavior change)
-  //
-  // Original project uses PC_WRITE_TOHOST as the primary completion trigger.
-  // Some software workloads (e.g. CoreMark in current flow) may finish user
-  // payload and then enter a self-loop instead of reaching the tohost PC,
-  // which makes simulation continue until timeout.
-  //
-  // We keep the original tohost path unchanged, and add a secondary
-  // convergence condition:
-  //   If commit PC stays at exactly the same value for a long enough streak,
-  //   we consider it as end-of-program spin loop and finish simulation.
-  //
-  // This is intentionally conservative to avoid affecting normal test flow.
-  // ----------------------------------------------------------------------
+  // CoreMark 等场景可能不走 tohost 退出路径，这里增加保守的自动结束条件
+  // 当 commit PC 长时间保持不变时，认为程序进入尾部自旋，触发 summary 输出。
   localparam [31:0] SAME_PC_AUTO_FINISH_TH = 32'd50000;
 
   always @(posedge hfclk or negedge rst_n)
@@ -114,6 +107,9 @@ module tb_top();
       ifu_wait_cycle <= 32'b0;
       ifu_flush_cycle <= 32'b0;
       lsu_wait_cycle <= 32'b0;
+      ifu_req_block_cycle <= 32'b0;
+      ifu_rsp_block_cycle <= 32'b0;
+      ir_busy_cycle <= 32'b0;
     end
     else if (pc_write_to_host_flag == 1'b0) begin
       if (brch_cmt_valid & brch_is_bxx) begin
@@ -133,6 +129,18 @@ module tb_top();
 
       if (lsu_cmd_wait) begin
         lsu_wait_cycle <= lsu_wait_cycle + 1'b1;
+      end
+
+      if (ifu_req_block) begin
+        ifu_req_block_cycle <= ifu_req_block_cycle + 1'b1;
+      end
+
+      if (ifu_rsp_block) begin
+        ifu_rsp_block_cycle <= ifu_rsp_block_cycle + 1'b1;
+      end
+
+      if (ifu_ir_busy) begin
+        ir_busy_cycle <= ir_busy_cycle + 1'b1;
       end
     end
   end
@@ -291,6 +299,9 @@ module tb_top();
         $display("~~~~~~~~~~~~~~~IFU bpu_wait cycles: %d ~~~~~~~~~~~~~~~~~", ifu_wait_cycle);
         $display("~~~~~~~~~~~~~~IFU flush req cycles: %d ~~~~~~~~~~~~~~~~~", ifu_flush_cycle);
         $display("~~~~~~~~~~~~~~~LSU cmd wait cycles: %d ~~~~~~~~~~~~~~~~~", lsu_wait_cycle);
+        $display("~~~~~~~~~~~~~IFU req block cycles: %d ~~~~~~~~~~~~~~~~~~", ifu_req_block_cycle);
+        $display("~~~~~~~~~~~~~IFU rsp block cycles: %d ~~~~~~~~~~~~~~~~~~", ifu_rsp_block_cycle);
+        $display("~~~~~~~~~~~~~~~~~IR busy cycles: %d ~~~~~~~~~~~~~~~~~~~~~", ir_busy_cycle);
         $display("~~~~~~~~~~~~~Same PC streak cycles: %d ~~~~~~~~~~~~~~~~~~", same_pc_streak);
         $display("~~~~~~~Auto finish by stuck PC flag: %d ~~~~~~~~~~~~~~~~~", auto_finish_by_stuck_pc);
         $display("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
