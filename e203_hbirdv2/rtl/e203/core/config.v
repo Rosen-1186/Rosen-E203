@@ -107,3 +107,14 @@
 // 3) E203_CFG_BHT_IDX_W=6 表示 64 项（索引 PC[7:2]）。
 `define E203_CFG_BPU_USE_BHT
 `define E203_CFG_BHT_IDX_W 6
+
+/////////////////////////////////////////////////////////////////
+// M1: MULDIV MUL 快路径实验
+// 说明：仅对 MUL 增加若干语义等价的快速特例（如乘 0/1/-1）；
+//      若需回退，注释掉该宏即可恢复原行为。
+`define E203_CFG_MDV_MUL_FAST
+
+// M1-EXP: MUL 单周期实验（仅 MUL，不影响 MULH/DIV/REM）
+// 说明：用于评估“缩短 MUL 计算窗口”对当前 workload 的收益上限；
+//      若需回退，注释掉该宏即可。
+`define E203_CFG_MDV_MUL_1CYC

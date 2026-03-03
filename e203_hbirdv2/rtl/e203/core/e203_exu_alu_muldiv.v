@@ -437,14 +437,49 @@ module e203_exu_alu_muldiv(
   wire div_special_cases = i_op_div & (div_by_0 | div_ovf);
   wire[`E203_XLEN-1:0] div_special_res = div_by_0 ? div_by_0_res : div_ovf_res;
 
+`ifdef E203_CFG_MDV_MUL_FAST
+  wire mul_rs1_is_0    = ~(|muldiv_i_rs1);
+  wire mul_rs2_is_0    = ~(|muldiv_i_rs2);
+  wire mul_rs1_is_1    = (muldiv_i_rs1 == 32'h0000_0001);
+  wire mul_rs2_is_1    = (muldiv_i_rs2 == 32'h0000_0001);
+  wire mul_rs1_is_neg1 = (&muldiv_i_rs1);
+  wire mul_rs2_is_neg1 = (&muldiv_i_rs2);
+
+  wire mul_special_cases = i_mul & (
+                           mul_rs1_is_0 | mul_rs2_is_0
+                         | mul_rs1_is_1 | mul_rs2_is_1
+                         | mul_rs1_is_neg1 | mul_rs2_is_neg1);
+
+  wire[`E203_XLEN-1:0] mul_special_res =
+                         (mul_rs1_is_0 | mul_rs2_is_0) ? 32'b0 :
+                         (mul_rs1_is_1) ? muldiv_i_rs2 :
+                         (mul_rs2_is_1) ? muldiv_i_rs1 :
+                         (mul_rs1_is_neg1) ? (~muldiv_i_rs2 + 1'b1) :
+                         (mul_rs2_is_neg1) ? (~muldiv_i_rs1 + 1'b1) :
+                                              32'b0;
+`else
+  wire mul_special_cases = 1'b0;
+  wire[`E203_XLEN-1:0] mul_special_res = 32'b0;
+`endif
+
+`ifdef E203_CFG_MDV_MUL_1CYC
+  wire mul_1cyc_cases = i_mul;
+  wire [63:0] mul_1cyc_full = $signed(muldiv_i_rs1) * $signed(muldiv_i_rs2);
+  wire[`E203_XLEN-1:0] mul_1cyc_res = mul_1cyc_full[`E203_XLEN-1:0];
+`else
+  wire mul_1cyc_cases = 1'b0;
+  wire[`E203_XLEN-1:0] mul_1cyc_res = `E203_XLEN'b0;
+`endif
+
 
 
 ///////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
 // Output generateion
-  assign special_cases = div_special_cases;// Only divider have special cases
-  wire[`E203_XLEN-1:0] special_res = div_special_res;// Only divider have special cases
+  assign special_cases = div_special_cases | mul_special_cases | mul_1cyc_cases;
+  wire[`E203_XLEN-1:0] special_res = mul_1cyc_cases ? mul_1cyc_res :
+                                     (mul_special_cases ? mul_special_res : div_special_res);
 
   // To detect the sequence of MULH[[S]U] rdh, rs1, rs2;    MUL rdl, rs1, rs2
   // To detect the sequence of     DIV[U] rdq, rs1, rs2; REM[U] rdr, rs1, rs2  

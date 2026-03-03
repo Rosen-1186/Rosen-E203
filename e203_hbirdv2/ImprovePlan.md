@@ -637,3 +637,139 @@ MDV 内部再拆：
 
 1. 先做 MUL 路径减周期实验（小步、可回退）。
 2. 再看 DIV/REM 代价优化是否有额外收益。
+
+---
+
+## 16. 2026-03-04 升级计划（聚焦 `DISP -> MDV`）
+
+> 前提（已验证）：瓶颈主因是 `MDV` 计算窗口（`wbck_condi` 未满足）导致 `muldiv_i_ready` 拉低，
+> 非 `o_ready`/写回背压，非 IFU/LSU 主导。
+
+### 16.1 关键观察点（代码锚点）
+
+- `rtl/e203/core/e203_exu_alu_muldiv.v`
+   - `muldiv_i_ready = wbck_condi & muldiv_o_ready`
+   - `wbck_condi` 在 `exec_last_cycle`（MUL 16 周期、DIV 32 周期）或校正阶段成立
+- `rtl/e203/core/e203_exu_alu.v`
+   - `mdv_i_ready` 直接影响 ALU 输入 `i_ready`，进而向上游 `disp_i_ready` 传播
+- `rtl/e203/core/e203_exu_disp.v`
+   - Dispatch 由 `disp_i_ready` 收敛，故 MDV 一处阻塞可反压到 `DISP`
+
+### 16.2 分阶段实施（调整版：跳过新增插针）
+
+#### Phase M0（已完成）：冻结基线与验收口径
+
+- 不再新增观测插针；沿用现有 `coremark.log` 指标体系。
+- 固化 A/B 对比口径（同 testcase、同编译参数、同退出条件）。
+- 统一验收阈值：至少同时关注 `cycle_count`、`CoreMark/MHz`、`MDV block MUL cycles`。
+
+#### Phase M1（立即执行）：MUL 路径减周期试验（中低风险，优先）
+
+- 方向：在不改 ISA 语义前提下，尝试缩短 MUL 有效执行窗口。
+- 推荐动作：
+   1. 审核 booth 迭代控制（当前趋近固定 16 周期）
+   2. 评估对 `mul/mulh*` 区分策略（保持功能一致）
+   3. 以宏开关隔离实验：`E203_CFG_MDV_MUL_FAST`
+- 验收：`MDV block MUL cycles` 显著下降且回归通过。
+
+#### Phase M2：DIV/REM “单条代价”优化（中风险，次优先）
+
+- 方向：降低 `~34 cycles/inst`，重点看 correction 触发率与可提前终止条件。
+- 推荐动作：
+   1. 统计 `div_need_corrct` 命中率
+   2. 按操作数模式分类（小除数、幂次、常量）观察可否早停
+   3. 宏开关：`E203_CFG_MDV_DIV_EARLYOUT`
+- 验收：`DIV/REM avg cycles` 降低，且 `M` 扩展一致性测试通过。
+
+#### Phase M3：结构级解耦（中高风险，可选）
+
+- 方向：让 MDV 从“强阻塞发射”走向“受控解耦”。
+- 候选：
+   1. `MDV` 前增加 1-entry request skid buffer（只缓冲，不乱序）
+   2. 保持 OITF 顺序语义，不引入多发射/乱序提交
+- 风险：握手与 flush 边界复杂度上升，需要加强形式化或断言覆盖。
+
+#### Phase M4：软件侧协同（低风险，高性价比）
+
+- CoreMark 独立编译 profile：
+   - A/B 编译选项与源码替代路径（减少热点 MUL 调用密度）
+- 目标：同步压低 `MDV issue MUL` 次数，形成“软硬件联合收益”。
+
+### 16.3 验证矩阵（每阶段都执行）
+
+1. 功能正确性：`riscv-tests`（至少 `rv32ui` + `rv32um`）
+2. 回归稳定性：现有 `coremark` 仿真流 + 关键裸机样例
+3. 性能指标：
+    - 主：`cycle_count`、`CoreMark/MHz`
+    - 因：`MDV block total`、`MDV block MUL/DIV/REM`、`issue/complete`
+4. 风险控制：所有实验特性必须可宏开关一键回退
+
+### 16.3.1 本周最小执行清单（按优先级）
+
+1. 直接启动 M1：先做 1 个可回退的 MUL 减周期小改动。
+2. 跑 `rv32ui + rv32um + coremark`，记录三项主指标变化。
+3. 若 M1 收益稳定，再进入 M2；否则先做 M4 编译侧 A/B。
+
+### 16.4 学习导向建议（边改边学）
+
+- 学习路径 1（握手反压）：
+   `e203_exu_alu_muldiv` -> `e203_exu_alu` -> `e203_exu_disp`
+- 学习路径 2（长指令顺序语义）：
+   `OITF` 分配/释放 + `longpipe` 提交路径
+- 学习路径 3（算法到微架构）：
+   Booth 乘法与 non-restoring 除法在状态机中的映射
+
+一句话策略：
+**跳过新增插针，直接以 M1 为主线拿周期收益，再决定是否进入 M2/M3 的复杂改造。**
+
+---
+
+## 17. 2026-03-04 M1 首轮实验结果（`MUL 1-cycle` 实验开关）
+
+> 说明：本轮结果来自同步 `vsim/install` 后的重编译运行，指标可用于和第 12~15 节基线做直接 A/B。
+
+### 17.1 关键结果（A/B）
+
+- `CoreMark/MHz`: `2.177890 -> 3.230183`（约 **+48.3%**）
+- `cycle_count`: `670267 -> 510291`（约 **-23.9%**）
+- `MDV block total`: `165103 -> 5589`（约 **-96.6%**）
+- `MDV block MUL cycles`: `160288 -> 772`（约 **-99.5%**）
+- `MDV issue MUL cnt`: `10019 -> 10019`（请求数量不变，说明主要是每条代价下降）
+
+### 17.2 结论
+
+1. `DISP -> MDV` 瓶颈判断被再次验证：当 `MUL` 计算窗口被显著压缩后，总体周期立即显著改善。
+2. 这组数据可视为“缩短 MUL 延迟上限”的收益上界参考。
+3. 分支相关指标变化很小，进一步支持“当前主矛盾在 MDV 而非前端预测”。
+
+### 17.3 风险与解释边界
+
+- 本实验采用 `MUL 1-cycle` 行为路径（实验宏），更偏“性能上界探针”，不等价于可直接量产实现。
+- 综合后面积/时序代价在本轮仿真中未评估，不能直接外推到 FPGA 频率收益。
+- 当前 `ITERATIONS=1` 且 `AUTO_FINISH_BY_STUCK_PC` 仍在，绝对分数仅用于相对比较。
+
+### 17.4 下一步建议（执行顺序）
+
+1. 保留 `MUL 1-cycle` 作为上界参考分支，不直接作为默认配置。
+2. 回到“可实现路径”推进：
+   - 先尝试 `MUL_FAST`（0/1/-1 特例）并测其真实命中收益；
+   - 再设计 2~4 周期的折中 MUL 方案（在时序与收益之间平衡）。
+3. 同步运行 `rv32um` 回归，确保 `M` 扩展语义稳定后再继续结构化优化。
+
+### 17.5 日志判读与交付注意
+
+- 日志中出现 `make[1]: Leaving directory ...` 通常只是子命令正常返回，不能单独作为失败依据。
+- 以以下信号判定“仿真已正常开始并完成”：
+   1. 出现 `vvp ... +TESTCASE=...` 启动行；
+   2. 出现 `Test Result Summary`；
+   3. 末尾出现 `TEST_PASS`（或明确失败标记）。
+- 若只看到 `Leaving directory` 而无上述内容，优先检查：
+   - 是否只执行了 `compile` 而未执行 `run/run_test`；
+   - 是否命令链被中断（如 `Exit Code 130`）；
+   - 是否输出被重定向到文件（需查看对应 `*.log`）。
+
+### 17.6 导出 `.verilog` 备注（流程约束）
+
+- 在对外交付 `.verilog` 网表/封装版本前，需执行地址码平移（address remap/shift）并复核地址窗口。
+- 最少核对项：`ITCM/DTCM/PPI/CLINT/PLIC/FIO` 的 base/region 与目标系统映射一致。
+- 建议在交付清单中固定加入“地址平移前后对照表 + 一条最小可运行用例日志”。
