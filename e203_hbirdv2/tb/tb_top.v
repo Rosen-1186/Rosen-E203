@@ -11,6 +11,9 @@ module tb_top();
 
   `define CPU_TOP u_e203_soc_top.u_e203_subsys_top.u_e203_subsys_main.u_e203_cpu_top
   `define EXU `CPU_TOP.u_e203_cpu.u_e203_core.u_e203_exu
+  `define EXU_DISP `EXU.u_e203_exu_disp
+  `define EXU_ALU `EXU.u_e203_exu_alu
+  `define EXU_MDV `EXU_ALU.u_e203_exu_alu_muldiv
   `define IFU_IFTCH `CPU_TOP.u_e203_cpu.u_e203_core.u_e203_ifu.u_e203_ifu_ifetch
   `define LSU_CTRL `CPU_TOP.u_e203_cpu.u_e203_core.u_e203_lsu.u_e203_lsu_ctrl
   `define BRCHSLV `EXU.u_e203_exu_commit.u_e203_exu_branchslv
@@ -38,6 +41,61 @@ module tb_top();
   reg [31:0] ifu_req_block_cycle;
   reg [31:0] ifu_rsp_block_cycle;
   reg [31:0] ir_busy_cycle;
+  reg [31:0] disp_block_dep_cycle;
+  reg [31:0] disp_block_oitf_cycle;
+  reg [31:0] disp_block_csrfence_cycle;
+  reg [31:0] disp_block_wfi_cycle;
+  reg [31:0] disp_block_other_cycle;
+  reg [31:0] disp_other_readypos_low_cycle;
+  reg [31:0] disp_other_readypos_high_cycle;
+  reg [31:0] disp_other_alu_notready_cycle;
+  reg [31:0] disp_other_agu_notready_cycle;
+  reg [31:0] disp_other_bjp_notready_cycle;
+  reg [31:0] disp_other_csr_notready_cycle;
+  reg [31:0] disp_other_ifu_excp_notready_cycle;
+  reg [31:0] disp_other_mdv_notready_cycle;
+  reg [31:0] disp_other_nice_notready_cycle;
+  reg [31:0] disp_other_ready_unknown_cycle;
+  reg [31:0] mdv_block_total_cycle;
+  reg [31:0] mdv_block_not_wbck_condi_cycle;
+  reg [31:0] mdv_block_wait_o_ready_cycle;
+  reg [31:0] mdv_block_wait_cmt_ready_cycle;
+  reg [31:0] mdv_block_wait_wbck_ready_cycle;
+  reg [31:0] mdv_block_wait_ready_unknown_cycle;
+  reg [31:0] mdv_block_sta_0th_cycle;
+  reg [31:0] mdv_block_sta_exec_cycle;
+  reg [31:0] mdv_block_sta_remd_chck_cycle;
+  reg [31:0] mdv_block_sta_quot_corr_cycle;
+  reg [31:0] mdv_block_sta_remd_corr_cycle;
+  reg [31:0] mdv_block_sta_unknown_cycle;
+  reg [31:0] mdv_block_exec_not_last_cycle;
+  reg [31:0] mdv_block_exec_last_cycle;
+  reg [31:0] mdv_block_remd_chck_need_corr_cycle;
+  reg [31:0] mdv_block_remd_chck_no_corr_cycle;
+  reg [31:0] mdv_block_b2b_or_special_cycle;
+  reg [31:0] mdv_req_mul_cycle;
+  reg [31:0] mdv_req_div_cycle;
+  reg [31:0] mdv_req_rem_cycle;
+  reg [31:0] mdv_req_divu_cycle;
+  reg [31:0] mdv_req_remu_cycle;
+  reg [31:0] mdv_req_mulh_family_cycle;
+  reg [31:0] mdv_issue_total_cnt;
+  reg [31:0] mdv_issue_mul_cnt;
+  reg [31:0] mdv_issue_div_cnt;
+  reg [31:0] mdv_issue_rem_cnt;
+  reg [31:0] mdv_issue_divu_cnt;
+  reg [31:0] mdv_issue_remu_cnt;
+  reg [31:0] mdv_issue_mulh_family_cnt;
+  reg [31:0] mdv_complete_total_cnt;
+  reg [31:0] mdv_complete_mul_cnt;
+  reg [31:0] mdv_complete_div_cnt;
+  reg [31:0] mdv_complete_rem_cnt;
+  reg [31:0] mdv_block_mul_cycle;
+  reg [31:0] mdv_block_div_cycle;
+  reg [31:0] mdv_block_rem_cycle;
+  reg [31:0] mdv_block_divu_cycle;
+  reg [31:0] mdv_block_remu_cycle;
+  reg [31:0] mdv_block_mulh_family_cycle;
   reg [31:0] same_pc_streak;
   reg [`E203_PC_SIZE-1:0] last_commit_pc;
   reg auto_finish_by_stuck_pc;
@@ -53,6 +111,90 @@ module tb_top();
   wire ifu_req_block = `IFU_IFTCH.ifu_req_valid & (~`IFU_IFTCH.ifu_req_ready);
   wire ifu_rsp_block = `IFU_IFTCH.ifu_rsp_valid & (~`IFU_IFTCH.ifu_rsp_ready);
   wire ifu_ir_busy = `IFU_IFTCH.ifu_o_valid & (~`IFU_IFTCH.ifu_o_ready);
+
+  wire disp_i_block = `EXU_DISP.disp_i_valid & (~`EXU_DISP.disp_i_ready);
+  wire disp_block_dep = `EXU_DISP.dep;
+  wire disp_block_csrfence = (`EXU_DISP.disp_csr | `EXU_DISP.disp_fence_fencei) & (~`EXU_DISP.oitf_empty);
+  wire disp_block_wfi = `EXU_DISP.wfi_halt_exu_req;
+  wire disp_block_oitf = `EXU_DISP.disp_alu_longp_prdt & (~`EXU_DISP.disp_oitf_ready);
+  wire disp_block_other = disp_i_block & (~disp_block_dep) & (~disp_block_csrfence) & (~disp_block_wfi) & (~disp_block_oitf);
+
+  wire disp_other_readypos_low = disp_block_other & (~`EXU_DISP.disp_i_ready_pos);
+  wire disp_other_readypos_high = disp_block_other & `EXU_DISP.disp_i_ready_pos;
+
+  wire disp_other_alu_notready = disp_other_readypos_low & `EXU_ALU.alu_op & (~`EXU_ALU.alu_i_ready);
+  wire disp_other_agu_notready = disp_other_readypos_low & `EXU_ALU.agu_op & (~`EXU_ALU.agu_i_ready);
+  wire disp_other_bjp_notready = disp_other_readypos_low & `EXU_ALU.bjp_op & (~`EXU_ALU.bjp_i_ready);
+  wire disp_other_csr_notready = disp_other_readypos_low & `EXU_ALU.csr_op & (~`EXU_ALU.csr_i_ready);
+  wire disp_other_ifu_excp_notready = disp_other_readypos_low & `EXU_ALU.ifu_excp_op & (~`EXU_ALU.ifu_excp_i_ready);
+`ifdef E203_SUPPORT_SHARE_MULDIV
+  wire disp_other_mdv_notready = disp_other_readypos_low & `EXU_ALU.mdv_op & (~`EXU_ALU.mdv_i_ready);
+`else
+  wire disp_other_mdv_notready = 1'b0;
+`endif
+`ifdef E203_HAS_NICE
+  wire disp_other_nice_notready = disp_other_readypos_low & `EXU_ALU.nice_op & (~`EXU_ALU.nice_i_ready);
+`else
+  wire disp_other_nice_notready = 1'b0;
+`endif
+  wire disp_other_ready_unknown = disp_other_readypos_low
+                                  & (~disp_other_alu_notready)
+                                  & (~disp_other_agu_notready)
+                                  & (~disp_other_bjp_notready)
+                                  & (~disp_other_csr_notready)
+                                  & (~disp_other_ifu_excp_notready)
+                                  & (~disp_other_mdv_notready)
+                                  & (~disp_other_nice_notready);
+
+  wire mdv_block = `EXU_ALU.mdv_i_valid & (~`EXU_ALU.mdv_i_ready);
+  wire mdv_block_not_wbck_condi = mdv_block & (~`EXU_MDV.wbck_condi);
+  wire mdv_block_wait_o_ready = mdv_block & `EXU_MDV.wbck_condi & (~`EXU_ALU.mdv_o_ready);
+  wire mdv_block_wait_cmt_ready = mdv_block_wait_o_ready & (~`EXU_ALU.cmt_o_ready);
+  wire mdv_block_wait_wbck_ready = mdv_block_wait_o_ready & `EXU_ALU.cmt_o_ready & (~`EXU_ALU.wbck_o_ready);
+  wire mdv_block_wait_ready_unknown = mdv_block_wait_o_ready & `EXU_ALU.cmt_o_ready & `EXU_ALU.wbck_o_ready;
+  wire mdv_block_sta_0th = mdv_block_not_wbck_condi & `EXU_MDV.muldiv_sta_is_0th;
+  wire mdv_block_sta_exec = mdv_block_not_wbck_condi & `EXU_MDV.muldiv_sta_is_exec;
+  wire mdv_block_sta_remd_chck = mdv_block_not_wbck_condi & `EXU_MDV.muldiv_sta_is_remd_chck;
+  wire mdv_block_sta_quot_corr = mdv_block_not_wbck_condi & `EXU_MDV.muldiv_sta_is_quot_corr;
+  wire mdv_block_sta_remd_corr = mdv_block_not_wbck_condi & `EXU_MDV.muldiv_sta_is_remd_corr;
+  wire mdv_block_sta_unknown = mdv_block_not_wbck_condi
+                               & (~`EXU_MDV.muldiv_sta_is_0th)
+                               & (~`EXU_MDV.muldiv_sta_is_exec)
+                               & (~`EXU_MDV.muldiv_sta_is_remd_chck)
+                               & (~`EXU_MDV.muldiv_sta_is_quot_corr)
+                               & (~`EXU_MDV.muldiv_sta_is_remd_corr);
+  wire mdv_block_exec_not_last = mdv_block_sta_exec & (~`EXU_MDV.exec_last_cycle);
+  wire mdv_block_exec_last = mdv_block_sta_exec & `EXU_MDV.exec_last_cycle;
+  wire mdv_block_remd_chck_need_corr = mdv_block_sta_remd_chck & `EXU_MDV.div_need_corrct;
+  wire mdv_block_remd_chck_no_corr = mdv_block_sta_remd_chck & (~`EXU_MDV.div_need_corrct);
+  wire mdv_block_b2b_or_special = mdv_block & (`EXU_MDV.back2back_seq | `EXU_MDV.special_cases);
+
+  wire mdv_req_mul = `EXU_ALU.mdv_i_valid & `EXU_MDV.i_op_mul;
+  wire mdv_req_div = `EXU_ALU.mdv_i_valid & (`EXU_MDV.i_div | `EXU_MDV.i_divu);
+  wire mdv_req_rem = `EXU_ALU.mdv_i_valid & (`EXU_MDV.i_rem | `EXU_MDV.i_remu);
+  wire mdv_req_divu = `EXU_ALU.mdv_i_valid & `EXU_MDV.i_divu;
+  wire mdv_req_remu = `EXU_ALU.mdv_i_valid & `EXU_MDV.i_remu;
+  wire mdv_req_mulh_family = `EXU_ALU.mdv_i_valid & (`EXU_MDV.i_mulh | `EXU_MDV.i_mulhsu | `EXU_MDV.i_mulhu);
+
+  wire mdv_issue_hsked = `EXU_MDV.muldiv_i_hsked;
+  wire mdv_issue_mul = mdv_issue_hsked & `EXU_MDV.i_op_mul;
+  wire mdv_issue_div = mdv_issue_hsked & (`EXU_MDV.i_div | `EXU_MDV.i_divu);
+  wire mdv_issue_rem = mdv_issue_hsked & (`EXU_MDV.i_rem | `EXU_MDV.i_remu);
+  wire mdv_issue_divu = mdv_issue_hsked & `EXU_MDV.i_divu;
+  wire mdv_issue_remu = mdv_issue_hsked & `EXU_MDV.i_remu;
+  wire mdv_issue_mulh_family = mdv_issue_hsked & (`EXU_MDV.i_mulh | `EXU_MDV.i_mulhsu | `EXU_MDV.i_mulhu);
+
+  wire mdv_complete_hsked = `EXU_MDV.muldiv_o_hsked;
+  wire mdv_complete_mul = mdv_complete_hsked & `EXU_MDV.i_op_mul;
+  wire mdv_complete_div = mdv_complete_hsked & (`EXU_MDV.i_div | `EXU_MDV.i_divu);
+  wire mdv_complete_rem = mdv_complete_hsked & (`EXU_MDV.i_rem | `EXU_MDV.i_remu);
+
+  wire mdv_block_mul = mdv_block & `EXU_MDV.i_op_mul;
+  wire mdv_block_div = mdv_block & (`EXU_MDV.i_div | `EXU_MDV.i_divu);
+  wire mdv_block_rem = mdv_block & (`EXU_MDV.i_rem | `EXU_MDV.i_remu);
+  wire mdv_block_divu = mdv_block & `EXU_MDV.i_divu;
+  wire mdv_block_remu = mdv_block & `EXU_MDV.i_remu;
+  wire mdv_block_mulh_family = mdv_block & (`EXU_MDV.i_mulh | `EXU_MDV.i_mulhsu | `EXU_MDV.i_mulhu);
 
   wire lsu_cmd_wait = `LSU_CTRL.agu_icb_cmd_valid & (~`LSU_CTRL.agu_icb_cmd_ready);
 
@@ -110,6 +252,61 @@ module tb_top();
       ifu_req_block_cycle <= 32'b0;
       ifu_rsp_block_cycle <= 32'b0;
       ir_busy_cycle <= 32'b0;
+      disp_block_dep_cycle <= 32'b0;
+      disp_block_oitf_cycle <= 32'b0;
+      disp_block_csrfence_cycle <= 32'b0;
+      disp_block_wfi_cycle <= 32'b0;
+      disp_block_other_cycle <= 32'b0;
+      disp_other_readypos_low_cycle <= 32'b0;
+      disp_other_readypos_high_cycle <= 32'b0;
+      disp_other_alu_notready_cycle <= 32'b0;
+      disp_other_agu_notready_cycle <= 32'b0;
+      disp_other_bjp_notready_cycle <= 32'b0;
+      disp_other_csr_notready_cycle <= 32'b0;
+      disp_other_ifu_excp_notready_cycle <= 32'b0;
+      disp_other_mdv_notready_cycle <= 32'b0;
+      disp_other_nice_notready_cycle <= 32'b0;
+      disp_other_ready_unknown_cycle <= 32'b0;
+      mdv_block_total_cycle <= 32'b0;
+      mdv_block_not_wbck_condi_cycle <= 32'b0;
+      mdv_block_wait_o_ready_cycle <= 32'b0;
+      mdv_block_wait_cmt_ready_cycle <= 32'b0;
+      mdv_block_wait_wbck_ready_cycle <= 32'b0;
+      mdv_block_wait_ready_unknown_cycle <= 32'b0;
+      mdv_block_sta_0th_cycle <= 32'b0;
+      mdv_block_sta_exec_cycle <= 32'b0;
+      mdv_block_sta_remd_chck_cycle <= 32'b0;
+      mdv_block_sta_quot_corr_cycle <= 32'b0;
+      mdv_block_sta_remd_corr_cycle <= 32'b0;
+      mdv_block_sta_unknown_cycle <= 32'b0;
+      mdv_block_exec_not_last_cycle <= 32'b0;
+      mdv_block_exec_last_cycle <= 32'b0;
+      mdv_block_remd_chck_need_corr_cycle <= 32'b0;
+      mdv_block_remd_chck_no_corr_cycle <= 32'b0;
+      mdv_block_b2b_or_special_cycle <= 32'b0;
+      mdv_req_mul_cycle <= 32'b0;
+      mdv_req_div_cycle <= 32'b0;
+      mdv_req_rem_cycle <= 32'b0;
+      mdv_req_divu_cycle <= 32'b0;
+      mdv_req_remu_cycle <= 32'b0;
+      mdv_req_mulh_family_cycle <= 32'b0;
+      mdv_issue_total_cnt <= 32'b0;
+      mdv_issue_mul_cnt <= 32'b0;
+      mdv_issue_div_cnt <= 32'b0;
+      mdv_issue_rem_cnt <= 32'b0;
+      mdv_issue_divu_cnt <= 32'b0;
+      mdv_issue_remu_cnt <= 32'b0;
+      mdv_issue_mulh_family_cnt <= 32'b0;
+      mdv_complete_total_cnt <= 32'b0;
+      mdv_complete_mul_cnt <= 32'b0;
+      mdv_complete_div_cnt <= 32'b0;
+      mdv_complete_rem_cnt <= 32'b0;
+      mdv_block_mul_cycle <= 32'b0;
+      mdv_block_div_cycle <= 32'b0;
+      mdv_block_rem_cycle <= 32'b0;
+      mdv_block_divu_cycle <= 32'b0;
+      mdv_block_remu_cycle <= 32'b0;
+      mdv_block_mulh_family_cycle <= 32'b0;
     end
     else if (pc_write_to_host_flag == 1'b0) begin
       if (brch_cmt_valid & brch_is_bxx) begin
@@ -141,6 +338,224 @@ module tb_top();
 
       if (ifu_ir_busy) begin
         ir_busy_cycle <= ir_busy_cycle + 1'b1;
+      end
+
+      if (disp_i_block) begin
+        if (disp_block_dep) begin
+          disp_block_dep_cycle <= disp_block_dep_cycle + 1'b1;
+        end
+        else if (disp_block_csrfence) begin
+          disp_block_csrfence_cycle <= disp_block_csrfence_cycle + 1'b1;
+        end
+        else if (disp_block_wfi) begin
+          disp_block_wfi_cycle <= disp_block_wfi_cycle + 1'b1;
+        end
+        else if (disp_block_oitf) begin
+          disp_block_oitf_cycle <= disp_block_oitf_cycle + 1'b1;
+        end
+        else begin
+          disp_block_other_cycle <= disp_block_other_cycle + 1'b1;
+        end
+      end
+
+      if (disp_other_readypos_low) begin
+        disp_other_readypos_low_cycle <= disp_other_readypos_low_cycle + 1'b1;
+      end
+
+      if (disp_other_readypos_high) begin
+        disp_other_readypos_high_cycle <= disp_other_readypos_high_cycle + 1'b1;
+      end
+
+      if (disp_other_alu_notready) begin
+        disp_other_alu_notready_cycle <= disp_other_alu_notready_cycle + 1'b1;
+      end
+
+      if (disp_other_agu_notready) begin
+        disp_other_agu_notready_cycle <= disp_other_agu_notready_cycle + 1'b1;
+      end
+
+      if (disp_other_bjp_notready) begin
+        disp_other_bjp_notready_cycle <= disp_other_bjp_notready_cycle + 1'b1;
+      end
+
+      if (disp_other_csr_notready) begin
+        disp_other_csr_notready_cycle <= disp_other_csr_notready_cycle + 1'b1;
+      end
+
+      if (disp_other_ifu_excp_notready) begin
+        disp_other_ifu_excp_notready_cycle <= disp_other_ifu_excp_notready_cycle + 1'b1;
+      end
+
+      if (disp_other_mdv_notready) begin
+        disp_other_mdv_notready_cycle <= disp_other_mdv_notready_cycle + 1'b1;
+      end
+
+      if (disp_other_nice_notready) begin
+        disp_other_nice_notready_cycle <= disp_other_nice_notready_cycle + 1'b1;
+      end
+
+      if (disp_other_ready_unknown) begin
+        disp_other_ready_unknown_cycle <= disp_other_ready_unknown_cycle + 1'b1;
+      end
+
+      if (mdv_block) begin
+        mdv_block_total_cycle <= mdv_block_total_cycle + 1'b1;
+      end
+
+      if (mdv_block_not_wbck_condi) begin
+        mdv_block_not_wbck_condi_cycle <= mdv_block_not_wbck_condi_cycle + 1'b1;
+      end
+
+      if (mdv_block_wait_o_ready) begin
+        mdv_block_wait_o_ready_cycle <= mdv_block_wait_o_ready_cycle + 1'b1;
+      end
+
+      if (mdv_block_wait_cmt_ready) begin
+        mdv_block_wait_cmt_ready_cycle <= mdv_block_wait_cmt_ready_cycle + 1'b1;
+      end
+
+      if (mdv_block_wait_wbck_ready) begin
+        mdv_block_wait_wbck_ready_cycle <= mdv_block_wait_wbck_ready_cycle + 1'b1;
+      end
+
+      if (mdv_block_wait_ready_unknown) begin
+        mdv_block_wait_ready_unknown_cycle <= mdv_block_wait_ready_unknown_cycle + 1'b1;
+      end
+
+      if (mdv_block_sta_0th) begin
+        mdv_block_sta_0th_cycle <= mdv_block_sta_0th_cycle + 1'b1;
+      end
+
+      if (mdv_block_sta_exec) begin
+        mdv_block_sta_exec_cycle <= mdv_block_sta_exec_cycle + 1'b1;
+      end
+
+      if (mdv_block_sta_remd_chck) begin
+        mdv_block_sta_remd_chck_cycle <= mdv_block_sta_remd_chck_cycle + 1'b1;
+      end
+
+      if (mdv_block_sta_quot_corr) begin
+        mdv_block_sta_quot_corr_cycle <= mdv_block_sta_quot_corr_cycle + 1'b1;
+      end
+
+      if (mdv_block_sta_remd_corr) begin
+        mdv_block_sta_remd_corr_cycle <= mdv_block_sta_remd_corr_cycle + 1'b1;
+      end
+
+      if (mdv_block_sta_unknown) begin
+        mdv_block_sta_unknown_cycle <= mdv_block_sta_unknown_cycle + 1'b1;
+      end
+
+      if (mdv_block_exec_not_last) begin
+        mdv_block_exec_not_last_cycle <= mdv_block_exec_not_last_cycle + 1'b1;
+      end
+
+      if (mdv_block_exec_last) begin
+        mdv_block_exec_last_cycle <= mdv_block_exec_last_cycle + 1'b1;
+      end
+
+      if (mdv_block_remd_chck_need_corr) begin
+        mdv_block_remd_chck_need_corr_cycle <= mdv_block_remd_chck_need_corr_cycle + 1'b1;
+      end
+
+      if (mdv_block_remd_chck_no_corr) begin
+        mdv_block_remd_chck_no_corr_cycle <= mdv_block_remd_chck_no_corr_cycle + 1'b1;
+      end
+
+      if (mdv_block_b2b_or_special) begin
+        mdv_block_b2b_or_special_cycle <= mdv_block_b2b_or_special_cycle + 1'b1;
+      end
+
+      if (mdv_req_mul) begin
+        mdv_req_mul_cycle <= mdv_req_mul_cycle + 1'b1;
+      end
+
+      if (mdv_req_div) begin
+        mdv_req_div_cycle <= mdv_req_div_cycle + 1'b1;
+      end
+
+      if (mdv_req_rem) begin
+        mdv_req_rem_cycle <= mdv_req_rem_cycle + 1'b1;
+      end
+
+      if (mdv_req_divu) begin
+        mdv_req_divu_cycle <= mdv_req_divu_cycle + 1'b1;
+      end
+
+      if (mdv_req_remu) begin
+        mdv_req_remu_cycle <= mdv_req_remu_cycle + 1'b1;
+      end
+
+      if (mdv_req_mulh_family) begin
+        mdv_req_mulh_family_cycle <= mdv_req_mulh_family_cycle + 1'b1;
+      end
+
+      if (mdv_issue_hsked) begin
+        mdv_issue_total_cnt <= mdv_issue_total_cnt + 1'b1;
+      end
+
+      if (mdv_issue_mul) begin
+        mdv_issue_mul_cnt <= mdv_issue_mul_cnt + 1'b1;
+      end
+
+      if (mdv_issue_div) begin
+        mdv_issue_div_cnt <= mdv_issue_div_cnt + 1'b1;
+      end
+
+      if (mdv_issue_rem) begin
+        mdv_issue_rem_cnt <= mdv_issue_rem_cnt + 1'b1;
+      end
+
+      if (mdv_issue_divu) begin
+        mdv_issue_divu_cnt <= mdv_issue_divu_cnt + 1'b1;
+      end
+
+      if (mdv_issue_remu) begin
+        mdv_issue_remu_cnt <= mdv_issue_remu_cnt + 1'b1;
+      end
+
+      if (mdv_issue_mulh_family) begin
+        mdv_issue_mulh_family_cnt <= mdv_issue_mulh_family_cnt + 1'b1;
+      end
+
+      if (mdv_complete_hsked) begin
+        mdv_complete_total_cnt <= mdv_complete_total_cnt + 1'b1;
+      end
+
+      if (mdv_complete_mul) begin
+        mdv_complete_mul_cnt <= mdv_complete_mul_cnt + 1'b1;
+      end
+
+      if (mdv_complete_div) begin
+        mdv_complete_div_cnt <= mdv_complete_div_cnt + 1'b1;
+      end
+
+      if (mdv_complete_rem) begin
+        mdv_complete_rem_cnt <= mdv_complete_rem_cnt + 1'b1;
+      end
+
+      if (mdv_block_mul) begin
+        mdv_block_mul_cycle <= mdv_block_mul_cycle + 1'b1;
+      end
+
+      if (mdv_block_div) begin
+        mdv_block_div_cycle <= mdv_block_div_cycle + 1'b1;
+      end
+
+      if (mdv_block_rem) begin
+        mdv_block_rem_cycle <= mdv_block_rem_cycle + 1'b1;
+      end
+
+      if (mdv_block_divu) begin
+        mdv_block_divu_cycle <= mdv_block_divu_cycle + 1'b1;
+      end
+
+      if (mdv_block_remu) begin
+        mdv_block_remu_cycle <= mdv_block_remu_cycle + 1'b1;
+      end
+
+      if (mdv_block_mulh_family) begin
+        mdv_block_mulh_family_cycle <= mdv_block_mulh_family_cycle + 1'b1;
       end
     end
   end
@@ -302,6 +717,61 @@ module tb_top();
         $display("~~~~~~~~~~~~~IFU req block cycles: %d ~~~~~~~~~~~~~~~~~~", ifu_req_block_cycle);
         $display("~~~~~~~~~~~~~IFU rsp block cycles: %d ~~~~~~~~~~~~~~~~~~", ifu_rsp_block_cycle);
         $display("~~~~~~~~~~~~~~~~~IR busy cycles: %d ~~~~~~~~~~~~~~~~~~~~~", ir_busy_cycle);
+        $display("~~~~~~~~~DISP block by dep cycles: %d ~~~~~~~~~~~~~~~~~~~", disp_block_dep_cycle);
+        $display("~~~~~~~~DISP block by OITF cycles: %d ~~~~~~~~~~~~~~~~~~~~", disp_block_oitf_cycle);
+        $display("~~~~~DISP block by CSR/FENCE cycles: %d ~~~~~~~~~~~~~~~~~~", disp_block_csrfence_cycle);
+        $display("~~~~~~~~~DISP block by WFI cycles: %d ~~~~~~~~~~~~~~~~~~~~", disp_block_wfi_cycle);
+        $display("~~~~~~~~DISP block by OTHER cycles: %d ~~~~~~~~~~~~~~~~~~~", disp_block_other_cycle);
+        $display("~~~~~~OTHER: disp_i_ready_pos low: %d ~~~~~~~~~~~~~~~~~~~~~", disp_other_readypos_low_cycle);
+        $display("~~~~~OTHER: disp_i_ready_pos high: %d ~~~~~~~~~~~~~~~~~~~~~", disp_other_readypos_high_cycle);
+        $display("~~~~~~~~OTHER: ALU not-ready cycles: %d ~~~~~~~~~~~~~~~~~~~~", disp_other_alu_notready_cycle);
+        $display("~~~~~~~~OTHER: AGU not-ready cycles: %d ~~~~~~~~~~~~~~~~~~~~", disp_other_agu_notready_cycle);
+        $display("~~~~~~~~OTHER: BJP not-ready cycles: %d ~~~~~~~~~~~~~~~~~~~~", disp_other_bjp_notready_cycle);
+        $display("~~~~~~~~OTHER: CSR not-ready cycles: %d ~~~~~~~~~~~~~~~~~~~~", disp_other_csr_notready_cycle);
+        $display("~~~OTHER: IFU-EXCP not-ready cycles: %d ~~~~~~~~~~~~~~~~~~~~", disp_other_ifu_excp_notready_cycle);
+        $display("~~~~~~~~OTHER: MDV not-ready cycles: %d ~~~~~~~~~~~~~~~~~~~~", disp_other_mdv_notready_cycle);
+        $display("~~~~~~~OTHER: NICE not-ready cycles: %d ~~~~~~~~~~~~~~~~~~~~", disp_other_nice_notready_cycle);
+        $display("~~~~OTHER: READY unknown cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~~", disp_other_ready_unknown_cycle);
+        $display("~~~~~~~~~MDV block total cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~~", mdv_block_total_cycle);
+        $display("~~~~~~MDV block not wbck_condi: %d ~~~~~~~~~~~~~~~~~~~~~~~~~~", mdv_block_not_wbck_condi_cycle);
+        $display("~~~~~~~~MDV block wait o_ready: %d ~~~~~~~~~~~~~~~~~~~~~~~~~~", mdv_block_wait_o_ready_cycle);
+        $display("~~~~~~MDV wait cmt_o_ready low: %d ~~~~~~~~~~~~~~~~~~~~~~~~~~", mdv_block_wait_cmt_ready_cycle);
+        $display("~~~~~MDV wait wbck_o_ready low: %d ~~~~~~~~~~~~~~~~~~~~~~~~~~", mdv_block_wait_wbck_ready_cycle);
+        $display("~~~~~~MDV wait ready unknown: %d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~", mdv_block_wait_ready_unknown_cycle);
+        $display("~~~~~~~~~~~MDV block in state 0th: %d ~~~~~~~~~~~~~~~~~~~~~~~", mdv_block_sta_0th_cycle);
+        $display("~~~~~~~~~~MDV block in state exec: %d ~~~~~~~~~~~~~~~~~~~~~~~", mdv_block_sta_exec_cycle);
+        $display("~~~~~MDV block in state remd_chck: %d ~~~~~~~~~~~~~~~~~~~~~~~", mdv_block_sta_remd_chck_cycle);
+        $display("~~~~~MDV block in state quot_corr: %d ~~~~~~~~~~~~~~~~~~~~~~~", mdv_block_sta_quot_corr_cycle);
+        $display("~~~~~MDV block in state remd_corr: %d ~~~~~~~~~~~~~~~~~~~~~~~", mdv_block_sta_remd_corr_cycle);
+        $display("~~~~~~MDV block in state unknown: %d ~~~~~~~~~~~~~~~~~~~~~~~~", mdv_block_sta_unknown_cycle);
+        $display("~~~~~~~~MDV exec not-last cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~~", mdv_block_exec_not_last_cycle);
+        $display("~~~~~~~~~~~MDV exec last cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~~~", mdv_block_exec_last_cycle);
+        $display("~~~MDV remd_chck need-corr cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~", mdv_block_remd_chck_need_corr_cycle);
+        $display("~~~~MDV remd_chck no-corr cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~~", mdv_block_remd_chck_no_corr_cycle);
+        $display("~~~~~~~~MDV b2b/special cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~~~~", mdv_block_b2b_or_special_cycle);
+        $display("~~~~~~~~~~~~MDV req MUL cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~~~~", mdv_req_mul_cycle);
+        $display("~~~~~~~~~~~~MDV req DIV cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~~~~", mdv_req_div_cycle);
+        $display("~~~~~~~~~~~~MDV req REM cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~~~~", mdv_req_rem_cycle);
+        $display("~~~~~~~~~~~MDV req DIVU cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~~~~", mdv_req_divu_cycle);
+        $display("~~~~~~~~~~~MDV req REMU cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~~~~", mdv_req_remu_cycle);
+        $display("~~~~~~~MDV req MULH* cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~", mdv_req_mulh_family_cycle);
+        $display("~~~~~~~~~~~~~~MDV issue total cnt: %d ~~~~~~~~~~~~~~~~~~~~~~~~", mdv_issue_total_cnt);
+        $display("~~~~~~~~~~~~~~~~MDV issue MUL cnt: %d ~~~~~~~~~~~~~~~~~~~~~~~~", mdv_issue_mul_cnt);
+        $display("~~~~~~~~~~~~~~~~MDV issue DIV cnt: %d ~~~~~~~~~~~~~~~~~~~~~~~~", mdv_issue_div_cnt);
+        $display("~~~~~~~~~~~~~~~~MDV issue REM cnt: %d ~~~~~~~~~~~~~~~~~~~~~~~~", mdv_issue_rem_cnt);
+        $display("~~~~~~~~~~~~~~~MDV issue DIVU cnt: %d ~~~~~~~~~~~~~~~~~~~~~~~~", mdv_issue_divu_cnt);
+        $display("~~~~~~~~~~~~~~~MDV issue REMU cnt: %d ~~~~~~~~~~~~~~~~~~~~~~~~", mdv_issue_remu_cnt);
+        $display("~~~~~~~~~~~MDV issue MULH* cnt: %d ~~~~~~~~~~~~~~~~~~~~~~~~~~", mdv_issue_mulh_family_cnt);
+        $display("~~~~~~~~~~~MDV complete total cnt: %d ~~~~~~~~~~~~~~~~~~~~~~~~", mdv_complete_total_cnt);
+        $display("~~~~~~~~~~~~~MDV complete MUL cnt: %d ~~~~~~~~~~~~~~~~~~~~~~~~", mdv_complete_mul_cnt);
+        $display("~~~~~~~~~~~~~MDV complete DIV cnt: %d ~~~~~~~~~~~~~~~~~~~~~~~~", mdv_complete_div_cnt);
+        $display("~~~~~~~~~~~~~MDV complete REM cnt: %d ~~~~~~~~~~~~~~~~~~~~~~~~", mdv_complete_rem_cnt);
+        $display("~~~~~~~~~~MDV block MUL cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~~~~", mdv_block_mul_cycle);
+        $display("~~~~~~~~~~MDV block DIV cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~~~~", mdv_block_div_cycle);
+        $display("~~~~~~~~~~MDV block REM cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~~~~", mdv_block_rem_cycle);
+        $display("~~~~~~~~~MDV block DIVU cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~~~~", mdv_block_divu_cycle);
+        $display("~~~~~~~~~MDV block REMU cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~~~~", mdv_block_remu_cycle);
+        $display("~~~~~~MDV block MULH* cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~~~~~", mdv_block_mulh_family_cycle);
         $display("~~~~~~~~~~~~~Same PC streak cycles: %d ~~~~~~~~~~~~~~~~~~", same_pc_streak);
         $display("~~~~~~~Auto finish by stuck PC flag: %d ~~~~~~~~~~~~~~~~~", auto_finish_by_stuck_pc);
         $display("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");

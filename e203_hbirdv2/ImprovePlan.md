@@ -391,3 +391,249 @@
 3. 选 Top1 瓶颈做单点改动，再 A/B。
 
 这样就能把“感觉不知道往哪优化”转成“有证据地按占比优化”。
+
+---
+
+## 10. 2026-03 基线复盘：关键瓶颈已经变化
+
+> 基于 `vsim/run/coremark/coremark.log` 的当前基线（`ITERATIONS=1`）统计。
+
+### 10.1 当前基线关键数值
+
+- `CoreMark/MHz = 2.154100`
+- `total_cycle = 678474`
+- `valid_ir_cycle = 406748`，故 `non_retire_cycle = 271726`
+- `branch_total = 130419`，`branch_mispredict = 21191`（误预测率约 `16.25%`）
+- `ifu_flush_cycle = 22361`（约占总周期 `3.30%`）
+- `ifu_bpu_wait_cycle = 2332`（约占总周期 `0.34%`）
+- `lsu_wait_cycle = 4938`（约占总周期 `0.73%`）
+- `ifu_rsp_block_cycle = 236367`（约占总周期 `34.84%`）
+- `ir_busy_cycle = 231235`（约占总周期 `34.08%`）
+
+### 10.2 结论：主瓶颈不再是分支，而是 IFU→EXU 背压
+
+从占比看，`ifu_rsp_block/ir_busy` 远大于 `flush`、`bpu_wait` 与 `lsu_wait`。这说明性能损失主要来自 **取指响应回来了，但 IR/EXU 暂时吃不下**，而不是单纯的分支预测问题。
+
+结合 RTL 可见：
+
+- `e203_ifu_ifetch.v` 中 `ifu_rsp_ready = ifu_ir_i_ready & ifu_req_ready & (~bpu_wait)`。
+- `ifu_ir_i_ready` 对应 EXU 的 `i_ready`。
+- `i_ready` 来自 `e203_exu_disp.v` 的 `disp_i_ready`，其受 RAW/WAW、`disp_oitf_ready`、CSR/FENCE/OITF 条件约束。
+
+因此当前最优先应转向 **Dispatch/OITF 背压分解与缓解**。
+
+### 10.3 下一阶段改进计划（按优先级）
+
+#### P1：先把背压拆清楚（只观测）
+
+在 `tb/tb_top.v` 新增分项计数：
+
+- `disp_block_dep_cycle`：`dep` 导致的阻塞（RAW/WAW）。
+- `disp_block_oitf_cycle`：`disp_alu_longp_prdt & ~disp_oitf_ready`。
+- `disp_block_csrfence_cycle`：CSR/FENCE 等待 `oitf_empty`。
+- `disp_block_wfi_cycle`：`wfi_halt_exu_req`。
+
+目标：把 `ir_busy_cycle` 分解为可行动作的 Top-N 子项。
+
+#### P2：低风险结构优化（先做）
+
+1. **IFU 响应侧 1-entry skid buffer（优先）**
+   - 位置：`e203_ifu_ifetch` 的响应→IR 交界。
+   - 目标：降低瞬时 `i_ready` 抖动导致的 `ifu_rsp_block`。
+
+2. **Dispatch 细化旁路（仅针对高频依赖）**
+   - 当 P1 证明 `dep` 是主导项时，再定点放宽或旁路。
+   - 原则：先做“可证明不改语义”的窄改动。
+
+#### P3：中风险优化（按数据决定）
+
+- 若 `disp_block_oitf_cycle` 高：评估 OITF 深度/仲裁策略。
+- 若 `disp_block_csrfence_cycle` 高：评估 CSR/FENCE 保守条件细化。
+- 若 `flush` 重新升高：再回到 BTB/JALR 路径优化。
+
+### 10.4 验证规则（保持可归因）
+
+每次仅改 1 个点，统一输出以下指标：
+
+- `CoreMark/MHz`
+- `valid_ir_cycle / cycle_count`（IPC 近似）
+- `ir_busy_cycle / cycle_count`
+- `ifu_rsp_block_cycle / cycle_count`
+- `branch_mispredict / branch_total`
+
+并固定：同一 testcase、同一编译选项、同一退出条件。
+
+---
+
+## 11. 面向学习的“处理器实战路径”
+
+建议你按下面顺序学习，每一步都配 1 个可观测任务：
+
+1. **系统层**：`rtl/e203/soc`、`rtl/e203/subsys`
+   - 任务：画出中断路径（PLIC/CLINT → CPU）。
+
+2. **前端层**：`e203_ifu_ifetch.v`、`e203_ifu_litebpu.v`
+   - 任务：追踪一次分支误预测从预测到 flush 的完整时序。
+
+3. **执行层**：`e203_exu_disp.v`、`e203_exu_commit.v`、`e203_exu_oitf.v`
+   - 任务：解释 `i_ready` 在一个 RAW 依赖场景下为何拉低。
+
+4. **访存层**：`e203_lsu_ctrl.v`
+   - 任务：区分“命令发不出”和“响应回不来”的等待差异。
+
+5. **验证层**：`tb/tb_top.v` + `vsim/Makefile`
+   - 任务：做一次 A/B（开关宏）并产出 1 页性能归因表。
+
+这个路径的核心是：**每读一层代码，就马上用计数器/波形做一次闭环验证**。
+
+---
+
+## 12. 2026-03-04 新日志复盘（P1 细分计数已生效）
+
+基于最新 `vsim/run/coremark/coremark.log`：
+
+- `CoreMark/MHz = 2.177890`
+- `total_cycle = 670267`
+- `valid_ir_cycle = 406951`，`IPC ~= 0.607`
+- `branch_total = 130453`，`branch_mispredict = 13331`（约 `10.22%`）
+- `ifu_rsp_block_cycle = 236029`（约 `35.21%`）
+- `ir_busy_cycle = 230990`（约 `34.46%`）
+
+新增的 dispatch 细分：
+
+- `disp_block_dep_cycle = 44685`
+- `disp_block_oitf_cycle = 0`
+- `disp_block_csrfence_cycle = 270`
+- `disp_block_wfi_cycle = 0`
+- `disp_block_other_cycle = 186035`
+
+### 12.1 关键结论
+
+1. `dep` 是显著子瓶颈，但不是最大头。
+2. `OITF`、`CSR/FENCE`、`WFI` 基本可排除为当前主矛盾。
+3. **`disp_block_other_cycle` 成为 Top1（远高于 dep）**，下一阶段需要继续拆解 `OTHER`。
+
+### 12.2 下一步（P1.5）
+
+在 testbench 继续把 `OTHER` 分解为：
+
+- `disp_i_ready_pos` 导致的阻塞（`disp_o_alu_ready` 拉低）
+- `alu 子通道 ready` 拉低（`alu_i_ready/agu_i_ready/bjp_i_ready/csr_i_ready/...`）
+- 写回仲裁相关（例如 longp 占用导致普通 ALU 让路）
+
+目标：把 `disp_block_other_cycle` 再拆到可直接改 RTL 的粒度，然后再决定是先做旁路、握手缓冲，还是写回仲裁改造。
+
+---
+
+## 13. 2026-03-04 深拆结论：`OTHER` 的主因是 MULDIV 执行时长，而非下游背压
+
+基于最新 `vsim/run/coremark/coremark.log`（已包含 MDV 细分项）：
+
+- `total_cycle = 670267`
+- `DISP block by OTHER = 186035`（约 `27.75%` 总周期）
+- `OTHER: MDV not-ready = 165103`（约占 OTHER 的 `88.75%`，约占总周期 `24.63%`）
+
+MDV 内部再拆：
+
+- `MDV block total = 165103`
+- `MDV block not wbck_condi = 165103`
+- `MDV block wait o_ready = 0`
+- `MDV wait cmt_o_ready low = 0`
+- `MDV wait wbck_o_ready low = 0`
+
+状态机贡献：
+
+- `state exec = 154782`（其中 `exec not-last = 154641`，`exec last = 141`）
+- `state 0th = 10159`
+- `state remd_chck = 81`
+- `state quot_corr = 81`
+
+### 13.1 结论
+
+1. 当前主瓶颈不是写回端/提交端 ready，而是 **MULDIV 自身多周期执行窗口**。
+2. 也就是说，`mdv_i_ready` 拉低的原因几乎全部来自 `wbck_condi` 尚未满足（算法阶段未完成），不是下游仲裁阻塞。
+3. 因此继续优化 IFU/dispatch 握手，短期收益会被该结构性长延迟上限压制。
+
+### 13.2 下一步优化优先级（按性价比）
+
+1. **软件编译策略先行（低风险）**
+   - 针对 CoreMark 单独做一组“减 DIV/REM 压力”编译实验（对比 `-O2` 与偏向乘加/移位的选项组合）。
+   - 目标：先验证 workload 是否被 `DIV/REM` 主导。
+
+2. **微架构中风险方案：缩短 MULDIV 关键路径**
+   - 优先看 DIV 状态机循环次数与可提前结束条件。
+   - 若实现复杂，先做“仅统计每类指令（mul/div/rem）占比 + 平均阻塞周期”再决定是否改 RTL。
+
+3. **结构方案（高风险）**
+   - 若确认长期要提 CoreMark，可评估“非阻塞 MULDIV 接口”或“更激进旁路/并行化”。
+   - 该类改造需更强验证，建议放在前两项后。
+
+---
+
+## 14. 2026-03-04 继续深拆：`mul/div/rem` 哪个最贵
+
+本轮新增了 MULDIV 按操作类型统计（同一日志）：
+
+- `MDV req MUL cycles = 170307`
+- `MDV req DIV cycles = 2566`
+- `MDV req REM cycles = 2391`
+- `MDV req MULH* cycles = 17`
+
+对应阻塞周期：
+
+- `MDV block MUL cycles = 160288`
+- `MDV block DIV cycles = 2493`
+- `MDV block REM cycles = 2322`
+- `MDV block MULH* cycles = 16`
+
+### 14.1 结论
+
+1. **MULDIV 阻塞主因是 MUL 族（尤其普通 MUL）而不是 DIV/REM**。
+2. DIV/REM 确实慢，但在当前 CoreMark 路径中的占比远小于 MUL 调用频度带来的总阻塞。
+3. 因为前面已证明 `wait_o_ready` 近似 0，所以关键矛盾仍是 **MULDIV 计算窗口本身**。
+
+### 14.2 可执行下一步（建议顺序）
+
+1. **先做“算法/实现级”小实验（低风险）**
+   - 目标：缩短 MUL 执行窗口（例如减少固定迭代数或加入更激进早停条件）。
+   - 要求：保持指令结果与异常语义不变。
+
+2. **并行做编译侧 A/B（低风险）**
+   - 尝试不同优化组合，观察 `MDV req MUL cycles` 是否可下降。
+   - 若请求次数明显下降，说明软件侧有可观收益。
+
+3. **再考虑结构级升级（中高风险）**
+   - 包括更宽乘法路径或不同乘法实现。
+   - 需配套更完整回归与时序评估。
+
+---
+
+## 15. 2026-03-04 继续插针结果：按“每条指令平均阻塞周期”评估
+
+新增统计项（issue/complete）显示：
+
+- `MDV issue total = 10161`，`MDV complete total = 10161`
+- `issue MUL = 10019`
+- `issue DIV = 73`
+- `issue REM = 69`
+
+结合阻塞周期可得：
+
+- MUL 平均阻塞约 `160288 / 10019 ≈ 15.998` cycles/inst
+- DIV 平均阻塞约 `2493 / 73 ≈ 34.151` cycles/inst
+- REM 平均阻塞约 `2322 / 69 ≈ 33.652` cycles/inst
+
+### 15.1 结论（两层）
+
+1. **单条代价层面**：DIV/REM 明显比 MUL 更贵（约 34 vs 16 cycles/inst）。
+2. **总量贡献层面**：MUL 数量远高于 DIV/REM（10019 vs 73/69），因此总阻塞仍由 MUL 主导。
+
+### 15.2 优化策略建议（基于数据）
+
+- 若目标是 **CoreMark 总周期最大化下降**：优先优化 MUL 路径（因为贡献体量最大）。
+- 若目标是 **最坏时延/单条指令延迟**：优先优化 DIV/REM 路径。
+
+对当前 workload（CoreMark）建议优先顺序：
+
+1. 先做 MUL 路径减周期实验（小步、可回退）。
+2. 再看 DIV/REM 代价优化是否有额外收益。
