@@ -42,6 +42,31 @@ module tb_top();
   reg [31:0] ifu_rsp_block_cycle;
   reg [31:0] ir_busy_cycle;
   reg [31:0] disp_block_dep_cycle;
+  reg [31:0] disp_block_raw_dep_cycle;
+  reg [31:0] disp_block_waw_dep_cycle;
+  reg [31:0] disp_block_dep_raw_only_cycle;
+  reg [31:0] disp_block_dep_waw_only_cycle;
+  reg [31:0] disp_block_dep_raw_waw_cycle;
+  reg [31:0] disp_dep_cons_alu_cycle;
+  reg [31:0] disp_dep_cons_agu_cycle;
+  reg [31:0] disp_dep_cons_bjp_cycle;
+  reg [31:0] disp_dep_cons_csr_cycle;
+  reg [31:0] disp_dep_cons_muldiv_cycle;
+  reg [31:0] disp_dep_cons_unknown_cycle;
+  reg [31:0] disp_dep_when_longp_prdt_cycle;
+  reg [31:0] disp_dep_raw_rs1en_cycle;
+  reg [31:0] disp_dep_raw_rs2en_cycle;
+  reg [31:0] disp_dep_raw_rs1rs2en_cycle;
+  reg [31:0] disp_dep_raw_rdwen_cycle;
+  reg [31:0] disp_block_raw_rs1_cycle;
+  reg [31:0] disp_block_raw_rs2_cycle;
+  reg [31:0] disp_block_raw_rs3_cycle;
+  reg [31:0] disp_block_raw_single_src_cycle;
+  reg [31:0] disp_block_raw_multi_src_cycle;
+  reg [31:0] disp_block_raw_rs12_cycle;
+  reg [31:0] disp_block_raw_rs13_cycle;
+  reg [31:0] disp_block_raw_rs23_cycle;
+  reg [31:0] disp_block_raw_rs123_cycle;
   reg [31:0] disp_block_oitf_cycle;
   reg [31:0] disp_block_csrfence_cycle;
   reg [31:0] disp_block_wfi_cycle;
@@ -114,6 +139,46 @@ module tb_top();
 
   wire disp_i_block = `EXU_DISP.disp_i_valid & (~`EXU_DISP.disp_i_ready);
   wire disp_block_dep = `EXU_DISP.dep;
+  wire [`E203_DECINFO_GRP_WIDTH-1:0] disp_grp = `EXU_DISP.disp_i_info_grp;
+  wire disp_block_raw_dep = disp_i_block & `EXU_DISP.raw_dep;
+  wire disp_block_waw_dep = disp_i_block & `EXU_DISP.waw_dep;
+  wire disp_dep_raw_only = disp_block_raw_dep & (~disp_block_waw_dep);
+  wire disp_dep_waw_only = disp_block_waw_dep & (~disp_block_raw_dep);
+  wire disp_dep_raw_waw = disp_block_raw_dep & disp_block_waw_dep;
+  wire disp_dep_cons_alu = disp_i_block & disp_block_dep & (disp_grp == `E203_DECINFO_GRP_ALU);
+  wire disp_dep_cons_agu = disp_i_block & disp_block_dep & (disp_grp == `E203_DECINFO_GRP_AGU);
+  wire disp_dep_cons_bjp = disp_i_block & disp_block_dep & (disp_grp == `E203_DECINFO_GRP_BJP);
+  wire disp_dep_cons_csr = disp_i_block & disp_block_dep & (disp_grp == `E203_DECINFO_GRP_CSR);
+`ifdef E203_SUPPORT_SHARE_MULDIV
+  wire disp_dep_cons_muldiv = disp_i_block & disp_block_dep & (disp_grp == `E203_DECINFO_GRP_MULDIV);
+`else
+  wire disp_dep_cons_muldiv = 1'b0;
+`endif
+  wire disp_dep_cons_unknown = disp_i_block & disp_block_dep
+                             & (~disp_dep_cons_alu)
+                             & (~disp_dep_cons_agu)
+                             & (~disp_dep_cons_bjp)
+                             & (~disp_dep_cons_csr)
+                             & (~disp_dep_cons_muldiv);
+  wire disp_dep_when_longp_prdt = disp_i_block & disp_block_dep & `EXU_DISP.disp_alu_longp_prdt;
+
+  wire disp_dep_raw_rs1en = disp_block_raw_dep & `EXU_DISP.disp_i_rs1en;
+  wire disp_dep_raw_rs2en = disp_block_raw_dep & `EXU_DISP.disp_i_rs2en;
+  wire disp_dep_raw_rs1rs2en = disp_block_raw_dep & `EXU_DISP.disp_i_rs1en & `EXU_DISP.disp_i_rs2en;
+  wire disp_dep_raw_rdwen = disp_block_raw_dep & `EXU_DISP.disp_i_rdwen;
+
+  wire disp_raw_match_rs1 = `EXU_DISP.oitfrd_match_disprs1;
+  wire disp_raw_match_rs2 = `EXU_DISP.oitfrd_match_disprs2;
+  wire disp_raw_match_rs3 = `EXU_DISP.oitfrd_match_disprs3;
+  wire disp_raw_match_one = disp_raw_match_rs1 ^ disp_raw_match_rs2 ^ disp_raw_match_rs3;
+  wire disp_raw_match_two = (disp_raw_match_rs1 & disp_raw_match_rs2 & (~disp_raw_match_rs3))
+                          | (disp_raw_match_rs1 & disp_raw_match_rs3 & (~disp_raw_match_rs2))
+                          | (disp_raw_match_rs2 & disp_raw_match_rs3 & (~disp_raw_match_rs1));
+  wire disp_raw_match_three = disp_raw_match_rs1 & disp_raw_match_rs2 & disp_raw_match_rs3;
+
+  wire disp_raw_match_rs12 = disp_raw_match_rs1 & disp_raw_match_rs2 & (~disp_raw_match_rs3);
+  wire disp_raw_match_rs13 = disp_raw_match_rs1 & disp_raw_match_rs3 & (~disp_raw_match_rs2);
+  wire disp_raw_match_rs23 = disp_raw_match_rs2 & disp_raw_match_rs3 & (~disp_raw_match_rs1);
   wire disp_block_csrfence = (`EXU_DISP.disp_csr | `EXU_DISP.disp_fence_fencei) & (~`EXU_DISP.oitf_empty);
   wire disp_block_wfi = `EXU_DISP.wfi_halt_exu_req;
   wire disp_block_oitf = `EXU_DISP.disp_alu_longp_prdt & (~`EXU_DISP.disp_oitf_ready);
@@ -253,6 +318,31 @@ module tb_top();
       ifu_rsp_block_cycle <= 32'b0;
       ir_busy_cycle <= 32'b0;
       disp_block_dep_cycle <= 32'b0;
+      disp_block_raw_dep_cycle <= 32'b0;
+      disp_block_waw_dep_cycle <= 32'b0;
+      disp_block_dep_raw_only_cycle <= 32'b0;
+      disp_block_dep_waw_only_cycle <= 32'b0;
+      disp_block_dep_raw_waw_cycle <= 32'b0;
+      disp_dep_cons_alu_cycle <= 32'b0;
+      disp_dep_cons_agu_cycle <= 32'b0;
+      disp_dep_cons_bjp_cycle <= 32'b0;
+      disp_dep_cons_csr_cycle <= 32'b0;
+      disp_dep_cons_muldiv_cycle <= 32'b0;
+      disp_dep_cons_unknown_cycle <= 32'b0;
+      disp_dep_when_longp_prdt_cycle <= 32'b0;
+      disp_dep_raw_rs1en_cycle <= 32'b0;
+      disp_dep_raw_rs2en_cycle <= 32'b0;
+      disp_dep_raw_rs1rs2en_cycle <= 32'b0;
+      disp_dep_raw_rdwen_cycle <= 32'b0;
+      disp_block_raw_rs1_cycle <= 32'b0;
+      disp_block_raw_rs2_cycle <= 32'b0;
+      disp_block_raw_rs3_cycle <= 32'b0;
+      disp_block_raw_single_src_cycle <= 32'b0;
+      disp_block_raw_multi_src_cycle <= 32'b0;
+      disp_block_raw_rs12_cycle <= 32'b0;
+      disp_block_raw_rs13_cycle <= 32'b0;
+      disp_block_raw_rs23_cycle <= 32'b0;
+      disp_block_raw_rs123_cycle <= 32'b0;
       disp_block_oitf_cycle <= 32'b0;
       disp_block_csrfence_cycle <= 32'b0;
       disp_block_wfi_cycle <= 32'b0;
@@ -343,6 +433,87 @@ module tb_top();
       if (disp_i_block) begin
         if (disp_block_dep) begin
           disp_block_dep_cycle <= disp_block_dep_cycle + 1'b1;
+
+          if (disp_block_raw_dep) begin
+            disp_block_raw_dep_cycle <= disp_block_raw_dep_cycle + 1'b1;
+
+            if (disp_dep_raw_rs1en) begin
+              disp_dep_raw_rs1en_cycle <= disp_dep_raw_rs1en_cycle + 1'b1;
+            end
+            if (disp_dep_raw_rs2en) begin
+              disp_dep_raw_rs2en_cycle <= disp_dep_raw_rs2en_cycle + 1'b1;
+            end
+            if (disp_dep_raw_rs1rs2en) begin
+              disp_dep_raw_rs1rs2en_cycle <= disp_dep_raw_rs1rs2en_cycle + 1'b1;
+            end
+            if (disp_dep_raw_rdwen) begin
+              disp_dep_raw_rdwen_cycle <= disp_dep_raw_rdwen_cycle + 1'b1;
+            end
+
+            if (disp_raw_match_rs1) begin
+              disp_block_raw_rs1_cycle <= disp_block_raw_rs1_cycle + 1'b1;
+            end
+            if (disp_raw_match_rs2) begin
+              disp_block_raw_rs2_cycle <= disp_block_raw_rs2_cycle + 1'b1;
+            end
+            if (disp_raw_match_rs3) begin
+              disp_block_raw_rs3_cycle <= disp_block_raw_rs3_cycle + 1'b1;
+            end
+
+            if (disp_raw_match_one) begin
+              disp_block_raw_single_src_cycle <= disp_block_raw_single_src_cycle + 1'b1;
+            end
+            if (disp_raw_match_two | disp_raw_match_three) begin
+              disp_block_raw_multi_src_cycle <= disp_block_raw_multi_src_cycle + 1'b1;
+            end
+
+            if (disp_raw_match_rs12) begin
+              disp_block_raw_rs12_cycle <= disp_block_raw_rs12_cycle + 1'b1;
+            end
+            if (disp_raw_match_rs13) begin
+              disp_block_raw_rs13_cycle <= disp_block_raw_rs13_cycle + 1'b1;
+            end
+            if (disp_raw_match_rs23) begin
+              disp_block_raw_rs23_cycle <= disp_block_raw_rs23_cycle + 1'b1;
+            end
+            if (disp_raw_match_three) begin
+              disp_block_raw_rs123_cycle <= disp_block_raw_rs123_cycle + 1'b1;
+            end
+          end
+
+          if (disp_block_waw_dep) begin
+            disp_block_waw_dep_cycle <= disp_block_waw_dep_cycle + 1'b1;
+          end
+          if (disp_dep_raw_only) begin
+            disp_block_dep_raw_only_cycle <= disp_block_dep_raw_only_cycle + 1'b1;
+          end
+          if (disp_dep_waw_only) begin
+            disp_block_dep_waw_only_cycle <= disp_block_dep_waw_only_cycle + 1'b1;
+          end
+          if (disp_dep_raw_waw) begin
+            disp_block_dep_raw_waw_cycle <= disp_block_dep_raw_waw_cycle + 1'b1;
+          end
+          if (disp_dep_cons_alu) begin
+            disp_dep_cons_alu_cycle <= disp_dep_cons_alu_cycle + 1'b1;
+          end
+          if (disp_dep_cons_agu) begin
+            disp_dep_cons_agu_cycle <= disp_dep_cons_agu_cycle + 1'b1;
+          end
+          if (disp_dep_cons_bjp) begin
+            disp_dep_cons_bjp_cycle <= disp_dep_cons_bjp_cycle + 1'b1;
+          end
+          if (disp_dep_cons_csr) begin
+            disp_dep_cons_csr_cycle <= disp_dep_cons_csr_cycle + 1'b1;
+          end
+          if (disp_dep_cons_muldiv) begin
+            disp_dep_cons_muldiv_cycle <= disp_dep_cons_muldiv_cycle + 1'b1;
+          end
+          if (disp_dep_cons_unknown) begin
+            disp_dep_cons_unknown_cycle <= disp_dep_cons_unknown_cycle + 1'b1;
+          end
+          if (disp_dep_when_longp_prdt) begin
+            disp_dep_when_longp_prdt_cycle <= disp_dep_when_longp_prdt_cycle + 1'b1;
+          end
         end
         else if (disp_block_csrfence) begin
           disp_block_csrfence_cycle <= disp_block_csrfence_cycle + 1'b1;
@@ -718,6 +889,31 @@ module tb_top();
         $display("~~~~~~~~~~~~~IFU rsp block cycles: %d ~~~~~~~~~~~~~~~~~~", ifu_rsp_block_cycle);
         $display("~~~~~~~~~~~~~~~~~IR busy cycles: %d ~~~~~~~~~~~~~~~~~~~~~", ir_busy_cycle);
         $display("~~~~~~~~~DISP block by dep cycles: %d ~~~~~~~~~~~~~~~~~~~", disp_block_dep_cycle);
+        $display("~~~~~~~DEP: raw_dep block cycles: %d ~~~~~~~~~~~~~~~~~~~~", disp_block_raw_dep_cycle);
+        $display("~~~~~~~DEP: waw_dep block cycles: %d ~~~~~~~~~~~~~~~~~~~~", disp_block_waw_dep_cycle);
+        $display("~~~~~~DEP: raw-only block cycles: %d ~~~~~~~~~~~~~~~~~~~~", disp_block_dep_raw_only_cycle);
+        $display("~~~~~~DEP: waw-only block cycles: %d ~~~~~~~~~~~~~~~~~~~~", disp_block_dep_waw_only_cycle);
+        $display("~~~~~DEP: raw+waw block cycles: %d ~~~~~~~~~~~~~~~~~~~~~~", disp_block_dep_raw_waw_cycle);
+        $display("~~~~~DEP by consumer ALU cycles: %d ~~~~~~~~~~~~~~~~~~~~~", disp_dep_cons_alu_cycle);
+        $display("~~~~~DEP by consumer AGU cycles: %d ~~~~~~~~~~~~~~~~~~~~~", disp_dep_cons_agu_cycle);
+        $display("~~~~~DEP by consumer BJP cycles: %d ~~~~~~~~~~~~~~~~~~~~~", disp_dep_cons_bjp_cycle);
+        $display("~~~~~DEP by consumer CSR cycles: %d ~~~~~~~~~~~~~~~~~~~~~", disp_dep_cons_csr_cycle);
+        $display("~~DEP by consumer MULDIV cycles: %d ~~~~~~~~~~~~~~~~~~~~~", disp_dep_cons_muldiv_cycle);
+        $display("~DEP by consumer UNKNOWN cycles: %d ~~~~~~~~~~~~~~~~~~~~~", disp_dep_cons_unknown_cycle);
+        $display("~~~~~~DEP with longp_prdt cycles: %d ~~~~~~~~~~~~~~~~~~~~", disp_dep_when_longp_prdt_cycle);
+        $display("~~~~~~~DEP RAW with rs1en cycles: %d ~~~~~~~~~~~~~~~~~~~~", disp_dep_raw_rs1en_cycle);
+        $display("~~~~~~~DEP RAW with rs2en cycles: %d ~~~~~~~~~~~~~~~~~~~~", disp_dep_raw_rs2en_cycle);
+        $display("~~~DEP RAW with rs1en&rs2en cycles: %d ~~~~~~~~~~~~~~~~~~", disp_dep_raw_rs1rs2en_cycle);
+        $display("~~~~~~DEP RAW with rdwen cycles: %d ~~~~~~~~~~~~~~~~~~~~~", disp_dep_raw_rdwen_cycle);
+        $display("~~~~DEP RAW src rs1-match cycles: %d ~~~~~~~~~~~~~~~~~~~~", disp_block_raw_rs1_cycle);
+        $display("~~~~DEP RAW src rs2-match cycles: %d ~~~~~~~~~~~~~~~~~~~~", disp_block_raw_rs2_cycle);
+        $display("~~~~DEP RAW src rs3-match cycles: %d ~~~~~~~~~~~~~~~~~~~~", disp_block_raw_rs3_cycle);
+        $display("~~~DEP RAW single-src cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~~", disp_block_raw_single_src_cycle);
+        $display("~~~~DEP RAW multi-src cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~~", disp_block_raw_multi_src_cycle);
+        $display("~~~~~DEP RAW rs1+rs2 cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~~~", disp_block_raw_rs12_cycle);
+        $display("~~~~~DEP RAW rs1+rs3 cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~~~", disp_block_raw_rs13_cycle);
+        $display("~~~~~DEP RAW rs2+rs3 cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~~~", disp_block_raw_rs23_cycle);
+        $display("~~~DEP RAW rs1+rs2+rs3 cycles: %d ~~~~~~~~~~~~~~~~~~~~~~~", disp_block_raw_rs123_cycle);
         $display("~~~~~~~~DISP block by OITF cycles: %d ~~~~~~~~~~~~~~~~~~~~", disp_block_oitf_cycle);
         $display("~~~~~DISP block by CSR/FENCE cycles: %d ~~~~~~~~~~~~~~~~~~", disp_block_csrfence_cycle);
         $display("~~~~~~~~~DISP block by WFI cycles: %d ~~~~~~~~~~~~~~~~~~~~", disp_block_wfi_cycle);
