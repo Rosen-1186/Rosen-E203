@@ -1164,9 +1164,18 @@ module e203_exu_decode(
   assign dec_rdidx  = rv32 ? rv32_rd [`E203_RFIDX_WIDTH-1:0] : rv16_rdidx ;
 
 
+  `ifdef E203_CFG_DEP_RV32_X0_FILTER
+  assign dec_rs1en = rv32 ? (rv32_need_rs1 & (~(rv32_rs1[`E203_RFIDX_WIDTH-1:0] == `E203_RFIDX_WIDTH'b0)))
+                          : (rv16_rs1en & (~(rv16_rs1idx == `E203_RFIDX_WIDTH'b0))); 
+  assign dec_rs2en = rv32 ? (rv32_need_rs2 & (~(rv32_rs2[`E203_RFIDX_WIDTH-1:0] == `E203_RFIDX_WIDTH'b0)))
+                          : (rv16_rs2en & (~(rv16_rs2idx == `E203_RFIDX_WIDTH'b0)));
+  assign dec_rdwen = rv32 ? (rv32_need_rd  & (~(rv32_rd [`E203_RFIDX_WIDTH-1:0] == `E203_RFIDX_WIDTH'b0)))
+                          : (rv16_rden  & (~(rv16_rdidx  == `E203_RFIDX_WIDTH'b0)));
+  `else
   assign dec_rs1en = rv32 ? rv32_need_rs1 : (rv16_rs1en & (~(rv16_rs1idx == `E203_RFIDX_WIDTH'b0))); 
   assign dec_rs2en = rv32 ? rv32_need_rs2 : (rv16_rs2en & (~(rv16_rs2idx == `E203_RFIDX_WIDTH'b0)));
   assign dec_rdwen = rv32 ? rv32_need_rd  : (rv16_rden  & (~(rv16_rdidx  == `E203_RFIDX_WIDTH'b0)));
+  `endif
 
   assign dec_rs1x0 = (dec_rs1idx == `E203_RFIDX_WIDTH'b0);
   assign dec_rs2x0 = (dec_rs2idx == `E203_RFIDX_WIDTH'b0);

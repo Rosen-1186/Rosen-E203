@@ -773,3 +773,23 @@ MDV 内部再拆：
 - 在对外交付 `.verilog` 网表/封装版本前，需执行地址码平移（address remap/shift）并复核地址窗口。
 - 最少核对项：`ITCM/DTCM/PPI/CLINT/PLIC/FIO` 的 base/region 与目标系统映射一致。
 - 建议在交付清单中固定加入“地址平移前后对照表 + 一条最小可运行用例日志”。
+
+---
+
+## 18. 2026-03-04 M2-STEP1 实施记录（`rv32 x0` 依赖过滤）
+
+### 18.1 实施内容
+
+- 新增宏：`E203_CFG_DEP_RV32_X0_FILTER`；
+- 在 `e203_exu_decode.v` 对 `rv32` 的 `dec_rs1en/dec_rs2en/dec_rdwen` 增加 `x0` 过滤；
+- 目标：消除伪依赖与无效写回（语义等价、可回退）。
+
+### 18.2 实验结论
+
+- CoreMark（`BHT on + MUL on`）保持：`CoreMark/MHz=3.230183`，`cycle_count=510291`（与改前基本一致）；
+- 回归通过：`rv32ui-p-add`、`rv32um-p-mul` 均 `TEST_PASS`。
+
+### 18.3 判断
+
+- 该步属于“低风险清噪”改造，功能正确且可保留；
+- 对当前主瓶颈收益有限，下一步仍应集中在 `dep -> raw -> rs1(ALU/BJP)` 的结构性路径优化。
